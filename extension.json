@@ -1,0 +1,76 @@
+{
+	"name": "yhb-eda-tools",
+	"uuid": "b687c5fa81464c7484461579c1d00325",
+	"displayName": "一键导出",
+	"description": "一键导出 PCB 制造资料到指定目录",
+	"version": "1.0.2",
+	"publisher": "YHB",
+	"engines": {
+		"eda": "^3.0.0"
+	},
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "extension-store",
+		"url": ""
+	},
+	"categories": "Other",
+	"keywords": [
+		"SDK",
+		"PCB",
+		"Export"
+	],
+	"images": {
+		"logo": "./images/logo.png"
+	},
+	"homepage": "",
+	"bugs": "",
+	"activationEvents": {},
+	"entry": "./dist/index",
+	"dependentExtensions": {},
+	"headerMenus": {
+		"home": [
+			{
+				"id": "yhb-eda-tools-home",
+				"title": "电子EDA工具",
+				"menuItems": [
+					{
+						"id": "About",
+						"title": "About...",
+						"registerFn": "about"
+					}
+				]
+			}
+		],
+		"sch": [
+			{
+				"id": "yhb-eda-tools-sch",
+				"title": "电子EDA工具",
+				"menuItems": [
+					{
+						"id": "About",
+						"title": "About...",
+						"registerFn": "about"
+					}
+				]
+			}
+		],
+		"pcb": [
+			{
+				"id": "yhb-eda-tools-pcb",
+				"title": "电子EDA工具",
+				"menuItems": [
+					{
+						"id": "ExportPcbMaterials",
+						"title": "导出PCB资料",
+						"registerFn": "openExportPcbPage"
+					},
+					{
+						"id": "About",
+						"title": "About...",
+						"registerFn": "about"
+					}
+				]
+			}
+		]
+	}
+}
