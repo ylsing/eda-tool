@@ -22,7 +22,7 @@
 	"images": {
 		"logo": "./images/logo.png"
 	},
-	"homepage": "",
+	"homepage": "https://github.com/ylsing/eda-tool",
 	"bugs": "",
 	"activationEvents": {},
 	"entry": "./dist/index",
