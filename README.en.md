@@ -1,6 +1,6 @@
 [简体中文](./README.md) | [English](#)
 
-# yhb-eda-tools
+#jiean-eda-tools
 
 EasyEDA PCB manufacturing export extension.
 

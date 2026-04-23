@@ -1,6 +1,6 @@
 [简体中文](#) | [English](./README.en.md)
 
-# yhb-eda-tools
+# jiean-eda-tools
 
 嘉立创EDA（EasyEDA）PCB 制造资料导出插件。
 目标是让 BOM/Gerber/坐标文件/DXF/3D 的导出更稳定、更可控，并支持统一命名规则。
