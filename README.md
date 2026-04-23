@@ -1,51 +1,78 @@
-[简体中文](#) | [English](./README.en.md) | [繁體中文](./README.zh-Hant.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+[简体中文](#) | [English](./README.en.md)
 
-# pro-api-sdk
+# yhb-eda-tools
 
-嘉立创EDA & EasyEDA 专业版扩展 API 开发工具
+嘉立创EDA（EasyEDA）PCB 制造资料导出插件。
+目标是让 BOM/Gerber/坐标文件/DXF/3D 的导出更稳定、更可控，并支持统一命名规则。
 
-<a href="https://github.com/easyeda/pro-api-sdk" style="vertical-align: inherit;" target="_blank"><img src="https://img.shields.io/github/stars/easyeda/pro-api-sdk" alt="GitHub Repo Stars" class="not-medium-zoom-image" style="display: inline; vertical-align: inherit;" /></a>&nbsp;<a href="https://github.com/easyeda/pro-api-sdk/issues" style="vertical-align: inherit;" target="_blank"><img src="https://img.shields.io/github/issues/easyeda/pro-api-sdk" alt="GitHub Issues" class="not-medium-zoom-image" style="display: inline; vertical-align: inherit;" /></a>&nbsp;<a href="https://github.com/easyeda/pro-api-sdk" style="vertical-align: inherit;" target="_blank"><img src="https://img.shields.io/github/repo-size/easyeda/pro-api-sdk" alt="GitHub Repo Size" class="not-medium-zoom-image" style="display: inline; vertical-align: inherit;" /></a>&nbsp;<a href="https://choosealicense.com/licenses/apache-2.0/" style="vertical-align: inherit;" target="_blank"><img src="https://img.shields.io/github/license/easyeda/pro-api-sdk" alt="GitHub License" class="not-medium-zoom-image" style="display: inline; vertical-align: inherit;" /></a>&nbsp;<a href="https://www.npmjs.com/package/@jlceda/pro-api-types" style="vertical-align: inherit;" target="_blank"><img src="https://img.shields.io/npm/v/%40jlceda%2Fpro-api-types?label=pro-api-types" alt="NPM Version" class="not-medium-zoom-image" style="display: inline; vertical-align: inherit;" /></a>&nbsp;<a href="https://www.npmjs.com/package/@jlceda/pro-api-types" style="vertical-align: inherit;" target="_blank"><img src="https://img.shields.io/npm/d18m/%40jlceda%2Fpro-api-types" alt="NPM Downloads" class="not-medium-zoom-image" style="display: inline; vertical-align: inherit;" /></a>
+## 功能概览
 
-> [!NOTE]
->
-> 详细开发文档请访问：[https://prodocs.lceda.cn/cn/api/guide/](https://prodocs.lceda.cn/cn/api/guide/)
+- 一键导出以下文件：
+  - BOM（`.xlsx`）
+  - Gerber（`.zip`）
+  - PickAndPlace 坐标（`.xlsx`）
+  - DXF（`.dxf`）
+  - 3D（`.step`）
+- 导出顺序优化：
+  - 先生成并保存 BOM
+  - 再导出其他文件
+- 双模式保存：
+  - 批量导出：填写保存路径后，直接写入该目录
+  - 逐个另存为：保存路径留空时，系统弹窗逐个保存
+- 模板与路径记忆：
+  - 记忆 BOM 模板
+  - 记忆保存路径（便于下次批量导出）
+- 失败处理增强：
+  - PCB 上下文校验
+  - `Failed to fetch` 轻量重试
+  - 错误分类与明细日志
 
-## 进入开发
+## 文件命名规则
 
-本开发工具组包含了用于开发 [嘉立创EDA专业版](https://pro.lceda.cn/) 扩展包的所有环境和工具，并内置了 ESLint 的推荐规则。
+导出文件名统一按以下规则生成（日期取导出当天）：
 
-1. 克隆 [pro-api-sdk](https://github.com/easyeda/pro-api-sdk) 项目仓库到本地
+- BOM: `BOM_Board1_{板名}_{YYYY-MM-DD}.xlsx`
+- Gerber: `Gerber_{板名}_{YYYY-MM-DD}.zip`
+- DXF: `DXF_{板名}_{YYYY-MM-DD}_AutoCAD2007.dxf`
+- 3D: `3D_{板名}_{YYYY-MM-DD}.step`
+- PickAndPlace: `PickAndPlace_{板名}_{YYYY_MM_DD}.xlsx`
 
-    Gitee:
+## 使用说明
 
-    ```shell
-    git clone --depth=1 https://gitee.com/jlceda/pro-api-sdk.git
-    ```
+1. 在 PCB 页面打开菜单 `电子EDA工具 -> 导出PCB资料`。
+2. 选择 BOM 模板。
+3. 选择导出方式：
+   - 批量导出：在“保存路径”中填写 Windows 绝对路径（如 `G:\测试`）。
+   - 逐个另存为：清空“保存路径”后点击导出。
+4. 点击“一键导出”，查看结果区日志。
 
-    GitHub:
+## 重要说明（批量导出）
 
-    ```shell
-    git clone --depth=1 https://github.com/easyeda/pro-api-sdk.git
-    ```
+- 批量导出依赖 `sys_FileSystem.saveFileToFileSystem` 能力（客户端本地文件系统能力与权限）。
+- 若客户端环境不支持该能力，插件会自动降级到“逐个另存为”继续导出。
+- 当前版本不主动创建本地目录；请先确保目标目录已存在且可写。
 
-2. 初始化开发环境（安装依赖）
+## 开发
 
-    ```shell
-    npm install
-    ```
+```bash
+npm install
+npm run compile
+```
 
-3. 进行些许变更 ...
+打包：
 
-4. 编译扩展包
+```bash
+npm run build
+```
 
-    ```shell
-    npm run build
-    ```
+产物目录：`./build/dist/`
 
-5. 在 嘉立创EDA专业版 中安装生成在 `./build/dist/` 下的扩展包
+## 目录结构
+
+- `src/index.ts`: 插件入口、菜单注册、页面打开逻辑
+- `iframe/export.html`: 导出页面 UI 与导出核心流程
+- `extension.json`: 插件元数据与菜单配置
 
 ## 开源许可
 
-<a href="https://choosealicense.com/licenses/apache-2.0/" style="vertical-align: inherit;" target="_blank"><img src="https://img.shields.io/github/license/easyeda/pro-api-sdk" alt="GitHub License" class="not-medium-zoom-image" style="display: inline; vertical-align: inherit;" /></a>
-
-本开发工具组使用 [Apache License 2.0](https://choosealicense.com/licenses/apache-2.0/) 开源许可协议，你仅可以将 **嘉立创EDA**、**EasyEDA** 商标信息用于依托于本工具组开发的扩展包的 **功能描述部分** 和 **开源发布的标题部分**。
+[Apache License 2.0](./LICENSE)

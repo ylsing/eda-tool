@@ -61,13 +61,39 @@
 				color: var(--sub);
 			}
 
-			select {
+			select,
+			input[type="text"] {
 				width: 100%;
 				padding: 10px 12px;
 				border: 1px solid var(--line);
 				border-radius: 8px;
 				font-size: 14px;
 				background: #fff;
+			}
+
+			.settings-title {
+				margin: 2px 0 8px;
+				font-size: 16px;
+				font-weight: 700;
+			}
+
+			.path-row {
+				display: grid;
+				grid-template-columns: auto 1fr;
+				gap: 10px;
+				align-items: center;
+			}
+
+			.path-label {
+				color: var(--text);
+				font-size: 14px;
+				white-space: nowrap;
+			}
+
+			.path-note {
+				margin-top: 6px;
+				color: var(--sub);
+				font-size: 12px;
 			}
 
 			.row {
@@ -143,7 +169,7 @@
 	<body>
 		<div class="panel">
 			<h1>导出PCB资料</h1>
-			<p class="desc">仅保留模板选择。点击一键导出后，直接弹出系统目录选择窗口。</p>
+			<p class="desc">填写保存路径时将按该路径批量导出；未填写时将改为系统“另存为”逐个保存。</p>
 
 			<div class="grid">
 				<div>
@@ -154,6 +180,14 @@
 						<button id="saveTemplateBtn" type="button">保存模板记忆</button>
 					</div>
 				</div>
+				<div>
+					<div class="settings-title">客户端设置</div>
+					<div class="path-row">
+						<div class="path-label">保存路径:</div>
+						<input id="outputDirInput" type="text" placeholder="如：C:\Users\Your\Documents" />
+					</div>
+					<div class="path-note">强烈建议填此项，避免保存弹窗过多</div>
+				</div>
 			</div>
 
 			<div class="footer">
@@ -162,21 +196,22 @@
 			</div>
 
 			<div id="result" class="result"></div>
-			<input id="nativeFolderPicker" type="file" webkitdirectory directory multiple style="display:none" />
 		</div>
 
 		<script>
 			(() => {
 				const STORAGE_TEMPLATE_KEY = 'export_pcb.default_template';
+				const STORAGE_OUTPUT_DIR_KEY = 'export_pcb.output_dir';
+				const STORAGE_OUTPUT_DIR_RAW_KEY = 'export_pcb.output_dir_raw';
 				const PCB_DOCUMENT_TYPE = 3;
 
 				const templateSelect = document.getElementById('templateSelect');
 				const refreshTemplatesBtn = document.getElementById('refreshTemplatesBtn');
 				const saveTemplateBtn = document.getElementById('saveTemplateBtn');
+				const outputDirInput = document.getElementById('outputDirInput');
 				const exportBtn = document.getElementById('exportBtn');
 				const statusMessage = document.getElementById('statusMessage');
 				const resultBox = document.getElementById('result');
-				const nativeFolderPicker = document.getElementById('nativeFolderPicker');
 
 				function getEdaApi() {
 					if (window.eda) {
@@ -213,32 +248,45 @@
 					return `${trimmed}${sep}`;
 				}
 
-				function extractDirectoryFromFile(fileLike) {
-					if (!fileLike || typeof fileLike.path !== 'string' || !fileLike.path) {
+				function toRawPath(pathOrUri) {
+					if (typeof pathOrUri !== 'string' || !pathOrUri.trim()) {
 						return undefined;
 					}
-					return fileLike.path.replace(/[\\/][^\\/]*$/, '');
+					return trimRightSeparators(pathOrUri.trim());
 				}
 
-				function extractDirectoryFromNativeFolderSelection(fileLike) {
-					if (!fileLike || typeof fileLike.path !== 'string' || !fileLike.path) {
+				function normalizeDirectoryInput(value) {
+					if (typeof value !== 'string') {
 						return undefined;
 					}
-
-					const absolutePath = fileLike.path;
-					const relativePath = typeof fileLike.webkitRelativePath === 'string' ? fileLike.webkitRelativePath : '';
-					if (!relativePath) {
-						return extractDirectoryFromFile(fileLike);
+					const cleaned = trimRightSeparators(value.trim().replace(/^"+|"+$/g, ''));
+					if (!cleaned) {
+						return undefined;
 					}
-
-					const relWin = relativePath.replace(/\//g, '\\');
-					const absLower = absolutePath.toLowerCase();
-					const relLower = relWin.toLowerCase();
-					if (absLower.endsWith(relLower)) {
-						return absolutePath.slice(0, absolutePath.length - relWin.length).replace(/[\\/]+$/, '');
+					if (!/^[a-zA-Z]:[\\/]/.test(cleaned)) {
+						return undefined;
 					}
+					return cleaned;
+				}
 
-					return extractDirectoryFromFile(fileLike);
+				function normalizeStoredFolderUri(uri) {
+					const raw = toRawPath(uri);
+					return raw ? toFolderUri(raw) : undefined;
+				}
+
+				function getDesktopPath() {
+					try {
+						const processApi = window.process || (window.parent && window.parent.process);
+						const env = processApi && processApi.env ? processApi.env : undefined;
+						const userProfile = env && env.USERPROFILE ? env.USERPROFILE : undefined;
+						if (typeof userProfile === 'string' && userProfile.trim()) {
+							return `${trimRightSeparators(userProfile)}\\Desktop`;
+						}
+					}
+					catch (error) {
+						console.warn('[yhb-eda-tools] get desktop path failed', error);
+					}
+					return undefined;
 				}
 
 				async function setConfig(key, value) {
@@ -309,47 +357,209 @@
 				}
 
 				function normalizeExportName(file, fallbackBase, defaultExt) {
-					const raw = file && file.name ? file.name : fallbackBase;
-					return withExt(raw, defaultExt);
+					// Force a deterministic export name pattern instead of using API-returned names.
+					return withExt(fallbackBase, defaultExt);
 				}
 
-				async function pickOutputDirBySelectingFile() {
-					const selected = await edaApi.sys_FileSystem.openReadFileDialog(undefined, false);
-					const dir = extractDirectoryFromFile(selected);
-					if (!dir) {
-						throw new Error('未获取到目标目录，请在目标目录内任选一个文件。');
+				function formatDatePart(date, separator) {
+					const year = date.getFullYear();
+					const month = `${date.getMonth() + 1}`.padStart(2, '0');
+					const day = `${date.getDate()}`.padStart(2, '0');
+					return [year, month, day].join(separator);
+				}
+
+				function normalizeBoardName(rawName) {
+					const safe = String(rawName || '')
+						.trim()
+						.replace(/\s+/g, '-')
+						.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
+					return safe || 'PCB';
+				}
+
+				function resolveConfiguredOutputPath() {
+					const inputPath = outputDirInput && outputDirInput.value ? outputDirInput.value : '';
+					const normalizedInputPath = normalizeDirectoryInput(inputPath);
+					if (inputPath.trim() && !normalizedInputPath) {
+						throw new Error('保存路径格式无效，请输入 Windows 绝对路径（如 C:\\Export）。');
 					}
-					return toFolderUri(dir);
+					return normalizedInputPath;
 				}
 
-				function pickOutputDir() {
-					return new Promise((resolve, reject) => {
-						const onChange = () => {
-							nativeFolderPicker.removeEventListener('change', onChange);
-							const files = nativeFolderPicker.files;
-							if (!files || files.length === 0) {
-								reject(new Error('未选择目录。'));
-								return;
-							}
-							const dir = extractDirectoryFromNativeFolderSelection(files[0]);
-							if (dir) {
-								resolve(toFolderUri(dir));
-								return;
-							}
+				function sleep(ms) {
+					return new Promise((resolve) => setTimeout(resolve, ms));
+				}
 
-							// In some EasyEDA runtimes, folder picker returns files without absolute path.
-							// Fallback: ask user to pick any file inside target folder, then infer its directory.
-							pickOutputDirBySelectingFile()
-								.then(resolve)
-								.catch((fallbackError) => {
-									reject(new Error(fallbackError && fallbackError.message ? fallbackError.message : '未获取到目标目录，请重试。'));
-								});
-						};
+				function getErrorMessage(error) {
+					if (error && error.message) {
+						return error.message;
+					}
+					if (typeof error === 'string' && error.trim()) {
+						return error;
+					}
+					const converted = String(error);
+					return converted && converted !== 'undefined' ? converted : 'unknown';
+				}
 
-						nativeFolderPicker.value = '';
-						nativeFolderPicker.addEventListener('change', onChange, { once: true });
-						nativeFolderPicker.click();
-					});
+				function createExportError(type, message) {
+					const error = new Error(message);
+					error.exportType = type;
+					return error;
+				}
+
+				function isFetchFailure(error) {
+					return /failed to fetch/i.test(getErrorMessage(error));
+				}
+
+				function classifyExportError(error) {
+					const type = error && error.exportType ? error.exportType : '';
+					const message = getErrorMessage(error);
+					if (type === 'context') {
+						return 'PCB上下文失效';
+					}
+					if (type === 'empty-file') {
+						return '接口返回空文件';
+					}
+					if (type === 'save-failed') {
+						return '本地保存失败';
+					}
+					if (type === 'filesystem-unavailable') {
+						return '文件系统接口不可用';
+					}
+					if (type === 'user-cancel') {
+						return '用户取消';
+					}
+					if (type === 'api-fetch') {
+						return '制造接口调用失败';
+					}
+					if (isFetchFailure(error)) {
+						return '制造接口调用失败';
+					}
+					if (/未获取到目标目录|选择目录/.test(message)) {
+						return '目录选择失败';
+					}
+					return '未知错误';
+				}
+
+				function joinWindowsPath(folderPath, fileName) {
+					const folder = trimRightSeparators(folderPath);
+					return `${folder}\\${fileName}`;
+				}
+
+				function toForwardSlashPath(path) {
+					return String(path || '').replace(/\\/g, '/');
+				}
+
+				async function ensurePcbContext(stage) {
+					const docInfo = await edaApi.dmt_SelectControl.getCurrentDocumentInfo();
+					if (!docInfo || docInfo.documentType !== PCB_DOCUMENT_TYPE) {
+						throw createExportError('context', `PCB 上下文失效（${stage}），请切回 PCB 页面后重试。`);
+					}
+					return docInfo;
+				}
+
+				async function getEnvironmentStatusText() {
+					if (!edaApi.sys_Environment) {
+						return '环境状态: 无法检测（接口不可用）';
+					}
+					try {
+						const isOnline = typeof edaApi.sys_Environment.isOnlineMode === 'function'
+							? edaApi.sys_Environment.isOnlineMode()
+							: undefined;
+						const isOffline = typeof edaApi.sys_Environment.isOfflineMode === 'function'
+							? edaApi.sys_Environment.isOfflineMode()
+							: undefined;
+						const isHalfOffline = typeof edaApi.sys_Environment.isHalfOfflineMode === 'function'
+							? edaApi.sys_Environment.isHalfOfflineMode()
+							: undefined;
+						const version = typeof edaApi.sys_Environment.getEditorCurrentVersion === 'function'
+							? edaApi.sys_Environment.getEditorCurrentVersion()
+							: 'unknown';
+						return `环境状态: online=${String(isOnline)}, offline=${String(isOffline)}, halfOffline=${String(isHalfOffline)}, version=${version}`;
+					}
+					catch (error) {
+						console.warn('[yhb-eda-tools] get environment status failed', error);
+						return `环境状态: 检测失败（${getErrorMessage(error)}）`;
+					}
+				}
+
+				async function generateManufactureFileWithRetry(label, getFile, retryTimes) {
+					const maxRetry = typeof retryTimes === 'number' && retryTimes >= 0 ? retryTimes : 0;
+					const startedAt = Date.now();
+					let lastError;
+
+					for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
+						try {
+							await ensurePcbContext(`${label}生成前`);
+							const file = await getFile();
+							await ensurePcbContext(`${label}生成后`);
+							if (!file) {
+								throw createExportError('empty-file', `${label} 接口未返回文件。`);
+							}
+							return {
+								file,
+								retryCount: attempt,
+								generateDurationMs: Date.now() - startedAt,
+							};
+						}
+						catch (error) {
+							lastError = error;
+							if (isFetchFailure(error) && attempt >= maxRetry) {
+								throw createExportError('api-fetch', `${label} 导出接口调用失败（${getErrorMessage(error)}）`);
+							}
+							if (!isFetchFailure(error) || attempt >= maxRetry) {
+								throw error;
+							}
+							await sleep(250 * (attempt + 1));
+						}
+					}
+
+					throw lastError || createExportError('unknown', `${label} 生成失败。`);
+				}
+
+				async function saveToTargetFolder(targetFolderUri, targetFolderRawPath, file, fileName, label) {
+					const saveStartedAt = Date.now();
+					const fullPathBackslash = joinWindowsPath(targetFolderRawPath, fileName);
+					const fullPathSlash = toForwardSlashPath(fullPathBackslash);
+					const candidateUris = [
+						fullPathBackslash,
+						fullPathSlash,
+						targetFolderUri,
+					];
+					let lastError;
+					for (let i = 0; i < candidateUris.length; i += 1) {
+						const uri = candidateUris[i];
+						try {
+							// Full-path mode is usually more reliable in some EasyEDA client builds.
+							const ok = i < 2
+								? await edaApi.sys_FileSystem.saveFileToFileSystem(uri, file, undefined, true)
+								: await edaApi.sys_FileSystem.saveFileToFileSystem(uri, file, fileName, true);
+							if (ok) {
+								return {
+									saveDurationMs: Date.now() - saveStartedAt,
+								};
+							}
+							lastError = createExportError('save-failed', `${label} 保存失败（返回 false）。uri=${uri}`);
+						}
+						catch (error) {
+							lastError = error;
+						}
+					}
+					const lastMsg = getErrorMessage(lastError);
+					if (isFetchFailure(lastError)) {
+						throw createExportError(
+							'filesystem-unavailable',
+							`${label} 批量保存不可用（${lastMsg}）。请检查扩展外部交互权限、目录可写性，或改用“逐个另存为”。`,
+						);
+					}
+					throw lastError || createExportError('save-failed', `${label} 保存失败。`);
+				}
+
+				async function saveWithSystemDialog(file, fileName) {
+					const saveStartedAt = Date.now();
+					await edaApi.sys_FileSystem.saveFile(file, fileName);
+					return {
+						saveDurationMs: Date.now() - saveStartedAt,
+					};
 				}
 
 				async function exportAll() {
@@ -370,78 +580,121 @@
 					appendResult('开始导出...');
 
 					try {
-						const docInfo = await edaApi.dmt_SelectControl.getCurrentDocumentInfo();
-						if (!docInfo || docInfo.documentType !== PCB_DOCUMENT_TYPE) {
-							throw new Error('请先激活 PCB 页面后再导出。');
-						}
+						await ensurePcbContext('预检');
+						appendResult(await getEnvironmentStatusText());
 
 						const pcbInfo = await edaApi.dmt_Pcb.getCurrentPcbInfo();
 						if (!pcbInfo || !pcbInfo.name) {
 							throw new Error('未获取到当前 PCB 信息。');
 						}
 
-						setStatus('请选择目标目录。若失败将自动改为“选择该目录内任意文件”。', '');
-						const targetFolderUri = await pickOutputDir();
-						appendResult(`保存目录: ${targetFolderUri}`);
+						const boardName = normalizeBoardName(pcbInfo.name);
+						const now = new Date();
+						const dateHyphen = formatDatePart(now, '-');
+						const dateUnderline = formatDatePart(now, '_');
 						appendResult(`BOM模板: ${selectedTemplate}`);
+						progress.showProgressBar(12, '正在生成 BOM');
 
-						const boardName = pcbInfo.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').trim() || 'PCB';
-						const jobs = [
+						const bomJob = {
+							label: 'BOM',
+							defaultExt: 'xlsx',
+							saveName: `BOM_Board1_${boardName}_${dateHyphen}`,
+							getFile: () => edaApi.pcb_ManufactureData.getBomFile('bom_export', 'xlsx', selectedTemplate),
+						};
+						const bomResult = await generateManufactureFileWithRetry(bomJob.label, bomJob.getFile, 2);
+						appendResult(`BOM生成完成: 重试 ${bomResult.retryCount} 次, 耗时 ${bomResult.generateDurationMs}ms`);
+
+						const configuredPath = resolveConfiguredOutputPath();
+						const targetFolderUri = configuredPath ? toFolderUri(configuredPath) : undefined;
+						let useBatchMode = Boolean(configuredPath);
+						if (configuredPath) {
+							progress.showProgressBar(28, '按保存路径导出 BOM');
+							appendResult(`保存目录: ${targetFolderUri}`);
+							appendResult('导出模式: 批量导出（按保存路径）');
+						}
+						else {
+							progress.showProgressBar(28, '按系统另存为保存 BOM');
+							appendResult('导出模式: 系统另存为（未填写保存路径）');
+							appendResult('提示: 未填写保存路径时，每个文件都会弹出一次另存为窗口。');
+						}
+
+						const bomFileName = normalizeExportName(bomResult.file, bomJob.saveName, bomJob.defaultExt);
+						let bomSaveResult;
+						if (useBatchMode) {
+							try {
+								bomSaveResult = await saveToTargetFolder(targetFolderUri, configuredPath, bomResult.file, bomFileName, bomJob.label);
+							}
+							catch (error) {
+								if (error && error.exportType === 'filesystem-unavailable') {
+									appendResult(`⚠️ 批量保存不可用，自动切换为系统另存为: ${getErrorMessage(error)}`);
+									useBatchMode = false;
+									bomSaveResult = await saveWithSystemDialog(bomResult.file, bomFileName);
+								}
+								else {
+									throw error;
+								}
+							}
+						}
+						else {
+							bomSaveResult = await saveWithSystemDialog(bomResult.file, bomFileName);
+						}
+						appendResult(`✅ BOM: ${bomFileName} | 生成耗时 ${bomResult.generateDurationMs}ms | 保存耗时 ${bomSaveResult.saveDurationMs}ms | 重试 ${bomResult.retryCount} 次`);
+
+						if (useBatchMode) {
+							await setConfig(STORAGE_OUTPUT_DIR_KEY, targetFolderUri);
+							await setConfig(STORAGE_OUTPUT_DIR_RAW_KEY, configuredPath);
+							setStatus('路径有效，正在批量导出其余文件...', 'success');
+						}
+						else {
+							setStatus('未填写保存路径，将按系统另存为逐个保存。', '');
+						}
+
+						const otherJobs = [
 							{
 								label: 'Gerber',
 								defaultExt: 'zip',
-								saveName: `${boardName}_Gerber`,
+								saveName: `Gerber_${boardName}_${dateHyphen}`,
 								getFile: () => edaApi.pcb_ManufactureData.getGerberFile('gerber_export'),
 							},
 							{
 								label: '坐标文件',
 								defaultExt: 'xlsx',
-								saveName: `${boardName}_PickAndPlace`,
+								saveName: `PickAndPlace_${boardName}_${dateUnderline}`,
 								getFile: () => edaApi.pcb_ManufactureData.getPickAndPlaceFile('pick_and_place_export', 'xlsx'),
-							},
-							{
-								label: 'BOM',
-								defaultExt: 'xlsx',
-								saveName: `${boardName}_BOM`,
-								getFile: () => edaApi.pcb_ManufactureData.getBomFile('bom_export', 'xlsx', selectedTemplate),
 							},
 							{
 								label: 'DXF',
 								defaultExt: 'dxf',
-								saveName: `${boardName}_DXF`,
+								saveName: `DXF_${boardName}_${dateHyphen}_AutoCAD2007`,
 								getFile: () => edaApi.pcb_ManufactureData.getDxfFile('dxf_export'),
 							},
 							{
 								label: '3D',
 								defaultExt: 'step',
-								saveName: `${boardName}_3D`,
+								saveName: `3D_${boardName}_${dateHyphen}`,
 								getFile: () => edaApi.pcb_ManufactureData.get3DFile('step_export', 'step'),
 							},
 						];
 
 						let failCount = 0;
 
-						for (let i = 0; i < jobs.length; i += 1) {
-							const job = jobs[i];
-							const ratio = Math.round(((i + 1) / (jobs.length + 1)) * 100);
+						for (let i = 0; i < otherJobs.length; i += 1) {
+							const job = otherJobs[i];
+							const ratio = Math.round(35 + ((i + 1) / otherJobs.length) * 55);
 							progress.showProgressBar(ratio, `导出中: ${job.label}`);
 							try {
-								const file = await job.getFile();
-								if (!file) {
-									throw new Error('接口未返回文件。');
-								}
-
-								const fileName = normalizeExportName(file, job.saveName, job.defaultExt);
-								const ok = await edaApi.sys_FileSystem.saveFileToFileSystem(targetFolderUri, file, fileName, true);
-								if (!ok) {
-									throw new Error('文件保存失败（返回 false）');
-								}
-								appendResult(`✅ ${job.label}: ${fileName}`);
+								const generated = await generateManufactureFileWithRetry(job.label, job.getFile, 2);
+								const fileName = normalizeExportName(generated.file, job.saveName, job.defaultExt);
+								const saved = useBatchMode
+									? await saveToTargetFolder(targetFolderUri, configuredPath, generated.file, fileName, job.label)
+									: await saveWithSystemDialog(generated.file, fileName);
+								appendResult(`✅ ${job.label}: ${fileName} | 生成耗时 ${generated.generateDurationMs}ms | 保存耗时 ${saved.saveDurationMs}ms | 重试 ${generated.retryCount} 次`);
 							}
 							catch (error) {
 								failCount += 1;
-								const reason = error && error.message ? error.message : String(error);
-								appendResult(`❌ ${job.label}: ${reason}`);
+								const reason = getErrorMessage(error);
+								const category = classifyExportError(error);
+								appendResult(`❌ ${job.label}: [${category}] ${reason}`);
 								console.error(`[yhb-eda-tools] export ${job.label} failed`, error);
 							}
 						}
@@ -455,10 +708,16 @@
 						}
 					}
 					catch (error) {
-						const reason = error && error.message ? error.message : String(error);
+						const reason = getErrorMessage(error);
 						console.error('[yhb-eda-tools] export process failed', error);
-						setStatus(reason, 'error');
-						appendResult(`❌ 终止: ${reason}`);
+						if (reason === '已取消选择目录。') {
+							setStatus(reason, '');
+							appendResult(`❌ 终止: [${classifyExportError(createExportError('user-cancel', reason))}] ${reason}`);
+						}
+						else {
+							setStatus(reason, 'error');
+							appendResult(`❌ 终止: [${classifyExportError(error)}] ${reason}`);
+						}
 					}
 					finally {
 						progress.destroyProgressBar();
@@ -475,6 +734,10 @@
 
 					const lastTemplate = getConfig(STORAGE_TEMPLATE_KEY);
 					await fillTemplates(typeof lastTemplate === 'string' ? lastTemplate : undefined);
+					const storedRawPath = toRawPath(getConfig(STORAGE_OUTPUT_DIR_RAW_KEY)) || toRawPath(getConfig(STORAGE_OUTPUT_DIR_KEY));
+					if (outputDirInput && storedRawPath) {
+						outputDirInput.value = storedRawPath;
+					}
 					exportBtn.disabled = false;
 				}
 
@@ -498,6 +761,20 @@
 					if (value) {
 						await setConfig(STORAGE_TEMPLATE_KEY, value);
 					}
+				});
+
+				outputDirInput.addEventListener('blur', async () => {
+					const path = outputDirInput.value ? outputDirInput.value.trim() : '';
+					if (!path) {
+						return;
+					}
+					const normalized = normalizeDirectoryInput(path);
+					if (!normalized) {
+						setStatus('保存路径格式无效，请输入 Windows 绝对路径（如 C:\\Export）。', 'error');
+						return;
+					}
+					await setConfig(STORAGE_OUTPUT_DIR_RAW_KEY, normalized);
+					await setConfig(STORAGE_OUTPUT_DIR_KEY, toFolderUri(normalized));
 				});
 
 				exportBtn.addEventListener('click', exportAll);
