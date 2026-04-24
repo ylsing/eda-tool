@@ -562,6 +562,50 @@
 					};
 				}
 
+				async function checkDrcBeforeGerber() {
+					if (!edaApi.pcb_Drc || typeof edaApi.pcb_Drc.check !== 'function') {
+						appendResult('⚠️ DRC接口不可用，已跳过Gerber前DRC检测。');
+						return;
+					}
+
+					appendResult('Gerber前置检查: 正在执行DRC检测...');
+					let drcPassed;
+					try {
+						// Returns true when DRC passes; false means rule issues detected.
+						drcPassed = await edaApi.pcb_Drc.check(true, true, false);
+					}
+					catch (error) {
+						appendResult(`⚠️ DRC检测执行失败，默认继续导出Gerber: ${getErrorMessage(error)}`);
+						return;
+					}
+
+					if (drcPassed === true) {
+						appendResult('✅ DRC检测通过，继续导出Gerber。');
+						return;
+					}
+
+					const message = '检测到DRC问题，是否继续导出Gerber？';
+					let confirmed = true;
+					try {
+						if (edaApi.sys_Dialog && typeof edaApi.sys_Dialog.showConfirmationMessage === 'function') {
+							confirmed = await edaApi.sys_Dialog.showConfirmationMessage(message, 'DRC检测');
+						}
+						else {
+							confirmed = window.confirm(message);
+						}
+					}
+					catch (error) {
+						appendResult(`⚠️ DRC确认弹窗调用失败，默认继续导出Gerber: ${getErrorMessage(error)}`);
+						confirmed = true;
+					}
+
+					if (!confirmed) {
+						throw createExportError('user-cancel', '用户取消：检测到DRC问题后未继续导出Gerber。');
+					}
+
+					appendResult('⚠️ 检测到DRC问题，用户选择继续导出Gerber。');
+				}
+
 				async function exportAll() {
 					clearResult();
 					setStatus('', '');
@@ -683,6 +727,9 @@
 							const ratio = Math.round(35 + ((i + 1) / otherJobs.length) * 55);
 							progress.showProgressBar(ratio, `导出中: ${job.label}`);
 							try {
+								if (job.label === 'Gerber') {
+									await checkDrcBeforeGerber();
+								}
 								const generated = await generateManufactureFileWithRetry(job.label, job.getFile, 2);
 								const fileName = normalizeExportName(generated.file, job.saveName, job.defaultExt);
 								const saved = useBatchMode

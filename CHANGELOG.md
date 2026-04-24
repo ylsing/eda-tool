@@ -1,6 +1,13 @@
 # Changelog
 
-## 1.0.3 (Unreleased)
+## 1.0.4
+
+### Added
+
+- Gerber 导出前新增 DRC 检测。
+- 检测到 DRC 问题时弹出确认框，用户可选择继续导出或取消。
+
+## 1.0.3
 
 ### Added
 

@@ -26,6 +26,9 @@ This plugin exports BOM/Gerber/PickAndPlace/DXF/3D files with stable naming rule
   - PCB context checks
   - Lightweight retry for `Failed to fetch`
   - Error categorization in result logs
+- DRC guard before Gerber export:
+  - Export proceeds directly when DRC passes.
+  - A confirmation dialog appears when DRC issues exist.
 
 ## Naming Rules
 

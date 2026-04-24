@@ -3,7 +3,7 @@
 	"uuid": "b687c5fa81464c7484461579c1d00325",
 	"displayName": "一键导出",
 	"description": "一键导出 PCB 生产资料到指定目录",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"publisher": "YHB",
 	"engines": {
 		"eda": "^3.0.0"
